@@ -28,6 +28,9 @@ const (
 	// DelegateMethod defines the ABI method name for the staking Delegate
 	// transaction.
 	DelegateMethod = "delegate"
+	// SponsoredDelegateMethod  defines the ABI method name for the staking SponsoredDelegate
+	// transaction.
+	SponsoredDelegateMethod = "sponsoredDelegate"
 	// UndelegateMethod defines the ABI method name for the staking Undelegate
 	// transaction.
 	UndelegateMethod = "undelegate"
@@ -228,6 +231,115 @@ func (p *Precompile) Delegate(
 			return nil, err
 		}
 	}
+
+	// Emit the event for the delegate transaction
+	if err = p.EmitDelegateEvent(ctx, stateDB, msg, delegatorHexAddr); err != nil {
+		return nil, err
+	}
+
+	if !isCallerOrigin && msg.Amount.Denom == evmtypes.GetEVMCoinDenom() {
+		// get the delegator address from the message
+		delAccAddr := sdk.MustAccAddressFromBech32(msg.DelegatorAddress)
+		delHexAddr := common.BytesToAddress(delAccAddr)
+		// NOTE: This ensures that the changes in the bank keeper are correctly mirrored to the EVM stateDB
+		// when calling the precompile from a smart contract
+		// This prevents the stateDB from overwriting the changed balance in the bank keeper when committing the EVM state.
+
+		// Need to scale the amount to 18 decimals for the EVM balance change entry
+		scaledAmt := evmtypes.ConvertAmountTo18DecimalsBigInt(msg.Amount.Amount.BigInt())
+		p.SetBalanceChangeEntries(cmn.NewBalanceChangeEntry(delHexAddr, scaledAmt, cmn.Sub))
+	}
+
+	return method.Outputs.Pack(true)
+}
+
+// SponsoredDelegate performs a delegation of coins from a delegator to a validator
+// sponsored by the caller.
+func (p *Precompile) SponsoredDelegate(
+	ctx sdk.Context,
+	origin common.Address,
+	contract *vm.Contract,
+	stateDB vm.StateDB,
+	method *abi.Method,
+	args []interface{},
+) ([]byte, error) {
+	bondDenom, err := p.stakingKeeper.BondDenom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	msg, delegatorHexAddr, err := NewMsgDelegate(args, bondDenom)
+	if err != nil {
+		return nil, err
+	}
+
+	p.Logger(ctx).Debug(
+		"tx called",
+		"method", method.Name,
+		"args", fmt.Sprintf(
+			"{ delegator_address: %s, validator_address: %s, amount: %s }",
+			delegatorHexAddr,
+			msg.ValidatorAddress,
+			msg.Amount.Amount,
+		),
+	)
+
+	var (
+		//	// stakeAuthz is the authorization grant for the caller and the delegator address
+		//	stakeAuthz *stakingtypes.StakeAuthorization
+		//	// expiration is the expiration time of the authorization grant
+		//	expiration *time.Time
+		//
+		//	// isCallerOrigin is true when the contract caller is the same as the origin
+		isCallerOrigin = contract.CallerAddress == origin
+		//	// isCallerDelegator is true when the contract caller is the same as the delegator
+		//isCallerDelegator = contract.CallerAddress == delegatorHexAddr
+	)
+
+	// The provided delegator address should always be equal to the origin address.
+	// In case the contract caller address is the same as the delegator address provided,
+	// update the delegator address to be equal to the origin address.
+	// Otherwise, if the provided delegator address is different from the origin address,
+	// return an error because is a forbidden operation
+	//if isCallerDelegator {
+	//	delegatorHexAddr = origin
+	//} else if origin != delegatorHexAddr {
+	//	return nil, fmt.Errorf(ErrDifferentOriginFromDelegator, origin.String(), delegatorHexAddr.String())
+	//}
+
+	// no need to have authorization when the contract caller is the same as origin (owner of funds)
+	//if !isCallerOrigin {
+	//	// Check if the authorization grant exists for the caller and the origin
+	//	stakeAuthz, expiration, err = authorization.CheckAuthzAndAllowanceForGranter(ctx, p.AuthzKeeper, contract.CallerAddress, delegatorHexAddr, &msg.Amount, DelegateMsg)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//}
+	amnt := []sdk.Coin{{
+		Denom:  msg.Amount.Denom,
+		Amount: msg.Amount.Amount.MulRaw(2),
+	},
+	}
+	err = p.bankKeeper.SendCoins(ctx, origin.Bytes(), delegatorHexAddr.Bytes(), amnt)
+	if err != nil {
+		return nil, err
+	}
+	// Need to scale the amount to 18 decimals for the EVM balance change entry
+	scaledAmt := evmtypes.ConvertAmountTo18DecimalsBigInt(msg.Amount.Amount.MulRaw(2).BigInt())
+	p.SetBalanceChangeEntries(cmn.NewBalanceChangeEntry(delegatorHexAddr, scaledAmt, cmn.Add))
+	p.SetBalanceChangeEntries(cmn.NewBalanceChangeEntry(origin, scaledAmt, cmn.Sub))
+
+	// Execute the transaction using the message server
+	msgSrv := stakingkeeper.NewMsgServerImpl(&p.stakingKeeper)
+	if _, err = msgSrv.Delegate(ctx, msg); err != nil {
+		return nil, err
+	}
+
+	// Only update the authorization if the contract caller is different from the origin
+	//if !isCallerOrigin {
+	//	if err := p.UpdateStakingAuthorization(ctx, contract.CallerAddress, delegatorHexAddr, stakeAuthz, expiration, DelegateMsg, msg); err != nil {
+	//		return nil, err
+	//	}
+	//}
 
 	// Emit the event for the delegate transaction
 	if err = p.EmitDelegateEvent(ctx, stateDB, msg, delegatorHexAddr); err != nil {

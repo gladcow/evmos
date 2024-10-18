@@ -36,9 +36,9 @@ func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
 // The method performs some checks if the sender of the tx is a clawback vesting account and then
 // relay the message to the Cosmos SDK staking method.
 func (k msgServer) Delegate(goCtx context.Context, msg *types.MsgDelegate) (*types.MsgDelegateResponse, error) {
-	if err := k.validateDelegationAmountNotUnvested(goCtx, msg.DelegatorAddress, msg.Amount.Amount); err != nil {
-		return nil, err
-	}
+	//if err := k.validateDelegationAmountNotUnvested(goCtx, msg.DelegatorAddress, msg.Amount.Amount); err != nil {
+	//	return nil, err
+	//}
 
 	return k.MsgServer.Delegate(goCtx, msg)
 }

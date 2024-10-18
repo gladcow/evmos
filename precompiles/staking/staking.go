@@ -5,6 +5,7 @@ package staking
 
 import (
 	"embed"
+	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
@@ -31,6 +32,7 @@ var f embed.FS
 type Precompile struct {
 	cmn.Precompile
 	stakingKeeper stakingkeeper.Keeper
+	bankKeeper    bankkeeper.Keeper
 }
 
 // LoadABI loads the staking ABI from the embedded abi.json file
@@ -44,6 +46,7 @@ func LoadABI() (abi.ABI, error) {
 func NewPrecompile(
 	stakingKeeper stakingkeeper.Keeper,
 	authzKeeper authzkeeper.Keeper,
+	bankKeeper bankkeeper.Keeper,
 ) (*Precompile, error) {
 	abi, err := LoadABI()
 	if err != nil {
@@ -59,6 +62,7 @@ func NewPrecompile(
 			ApprovalExpiration:   cmn.DefaultExpirationDuration, // should be configurable in the future.
 		},
 		stakingKeeper: stakingKeeper,
+		bankKeeper:    bankKeeper,
 	}
 	// SetAddress defines the address of the staking precompiled contract.
 	p.SetAddress(common.HexToAddress(evmtypes.StakingPrecompileAddress))
@@ -112,6 +116,8 @@ func (p Precompile) Run(evm *vm.EVM, contract *vm.Contract, readOnly bool) (bz [
 		bz, err = p.EditValidator(ctx, evm.Origin, contract, stateDB, method, args)
 	case DelegateMethod:
 		bz, err = p.Delegate(ctx, evm.Origin, contract, stateDB, method, args)
+	case SponsoredDelegateMethod:
+		bz, err = p.SponsoredDelegate(ctx, evm.Origin, contract, stateDB, method, args)
 	case UndelegateMethod:
 		bz, err = p.Undelegate(ctx, evm.Origin, contract, stateDB, method, args)
 	case RedelegateMethod:
