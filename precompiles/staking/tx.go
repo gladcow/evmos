@@ -314,19 +314,17 @@ func (p *Precompile) SponsoredDelegate(
 	//		return nil, err
 	//	}
 	//}
-	amnt := []sdk.Coin{{
-		Denom:  msg.Amount.Denom,
-		Amount: msg.Amount.Amount.MulRaw(2),
-	},
-	}
-	err = p.bankKeeper.SendCoins(ctx, origin.Bytes(), delegatorHexAddr.Bytes(), amnt)
-	if err != nil {
-		return nil, err
-	}
-	// Need to scale the amount to 18 decimals for the EVM balance change entry
-	scaledAmt := evmtypes.ConvertAmountTo18DecimalsBigInt(msg.Amount.Amount.MulRaw(2).BigInt())
-	p.SetBalanceChangeEntries(cmn.NewBalanceChangeEntry(delegatorHexAddr, scaledAmt, cmn.Add))
-	p.SetBalanceChangeEntries(cmn.NewBalanceChangeEntry(origin, scaledAmt, cmn.Sub))
+	//amnt := []sdk.Coin{{
+	//	Denom:  msg.Amount.Denom,
+	//	Amount: msg.Amount.Amount,
+	//},
+	//}
+	//p.Logger(ctx).Info("Delegate addresses", "origin", origin,
+	//	"delegator", delegatorHexAddr)
+	//err = p.bankKeeper.SendCoins(ctx, origin.Bytes(), delegatorHexAddr.Bytes(), amnt)
+	//if err != nil {
+	//	return nil, err
+	//}
 
 	// Execute the transaction using the message server
 	msgSrv := stakingkeeper.NewMsgServerImpl(&p.stakingKeeper)
