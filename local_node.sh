@@ -8,7 +8,7 @@ MONIKER="localtestnet"
 # The keyring test does not require private key to steal tokens from you
 KEYRING="test"
 KEYALGO="eth_secp256k1"
-LOGLEVEL="info"
+LOGLEVEL="debug"
 # Set dedicated home directory for the evmosd instance
 HOMEDIR="$HOME/.tmp-evmosd"
 # to trace evm
@@ -219,7 +219,8 @@ fi
 evmosd start \
 	--metrics "$TRACE" \
 	--log_level $LOGLEVEL \
+	--log_format json \
 	--minimum-gas-prices=0.0001$BASE_DENOM \
 	--json-rpc.api eth,txpool,personal,net,debug,web3 \
 	--home "$HOMEDIR" \
-	--chain-id "$CHAINID"
+	--chain-id "$CHAINID" >evmos.log  2>&1

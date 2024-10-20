@@ -6,6 +6,8 @@ package keeper
 import (
 	"context"
 	"fmt"
+	"github.com/cosmos/cosmos-sdk/telemetry"
+	"github.com/hashicorp/go-metrics"
 
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/math"
@@ -35,12 +37,69 @@ func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
 // Delegate defines a method for performing a delegation of coins from a delegator to a validator.
 // The method performs some checks if the sender of the tx is a clawback vesting account and then
 // relay the message to the Cosmos SDK staking method.
-func (k msgServer) Delegate(goCtx context.Context, msg *types.MsgDelegate) (*types.MsgDelegateResponse, error) {
-	//if err := k.validateDelegationAmountNotUnvested(goCtx, msg.DelegatorAddress, msg.Amount.Amount); err != nil {
-	//	return nil, err
-	//}
+func (k msgServer) Delegate(ctx context.Context, msg *types.MsgDelegate) (*types.MsgDelegateResponse, error) {
+	valAddr, valErr := k.vac.StringToBytes(msg.ValidatorAddress)
+	if valErr != nil {
+		return nil, errortypes.ErrInvalidAddress.Wrapf("invalid validator address: %s", valErr)
+	}
 
-	return k.MsgServer.Delegate(goCtx, msg)
+	delegatorAddress, err := k.ak.AddressCodec().StringToBytes(msg.DelegatorAddress)
+	if err != nil {
+		return nil, errortypes.ErrInvalidAddress.Wrapf("invalid delegator address: %s", err)
+	}
+
+	if !msg.Amount.IsValid() || !msg.Amount.Amount.IsPositive() {
+		return nil, errorsmod.Wrap(
+			errortypes.ErrInvalidRequest,
+			"invalid delegation amount",
+		)
+	}
+
+	validator, err := k.GetValidator(ctx, valAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	bondDenom, err := k.BondDenom(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if msg.Amount.Denom != bondDenom {
+		return nil, errorsmod.Wrapf(
+			errortypes.ErrInvalidRequest, "invalid coin denomination: got %s, expected %s", msg.Amount.Denom, bondDenom,
+		)
+	}
+
+	// NOTE: source funds are always unbonded
+	newShares, err := k.Keeper.Delegate(ctx, delegatorAddress, msg.Amount.Amount, types.Unbonded, validator, true)
+	if err != nil {
+		return nil, err
+	}
+
+	if msg.Amount.Amount.IsInt64() {
+		defer func() {
+			telemetry.IncrCounter(1, types.ModuleName, "delegate")
+			telemetry.SetGaugeWithLabels(
+				[]string{"tx", "msg", sdk.MsgTypeURL(msg)},
+				float32(msg.Amount.Amount.Int64()),
+				[]metrics.Label{telemetry.NewLabel("denom", msg.Amount.Denom)},
+			)
+		}()
+	}
+
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	sdkCtx.EventManager().EmitEvents(sdk.Events{
+		sdk.NewEvent(
+			types.EventTypeDelegate,
+			sdk.NewAttribute(types.AttributeKeyValidator, msg.ValidatorAddress),
+			sdk.NewAttribute(types.AttributeKeyDelegator, msg.DelegatorAddress),
+			sdk.NewAttribute(sdk.AttributeKeyAmount, msg.Amount.String()),
+			sdk.NewAttribute(types.AttributeKeyNewShares, newShares.String()),
+		),
+	})
+
+	return &types.MsgDelegateResponse{}, nil
 }
 
 // CreateValidator defines a method to create a validator. The method performs some checks if the
